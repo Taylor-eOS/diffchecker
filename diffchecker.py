@@ -52,6 +52,8 @@ class DiffCheckerApp:
             widget.bind("<Control-A>", self.select_all)
             widget.bind("<Control-c>", self.copy_selection)
             widget.bind("<Control-C>", self.copy_selection)
+            widget.bind("<Control-v>", self.default_paste)
+            widget.bind("<Control-V>", self.default_paste)
         self.left_text.bind("<MouseWheel>", self._on_mousewheel)
         self.right_text.bind("<MouseWheel>", self._on_mousewheel)
         self.left_text.bind("<Button-4>", self._on_linux_scroll)
@@ -63,10 +65,31 @@ class DiffCheckerApp:
             text="Compare",
             command=self.compare_texts)
         self.compare_button.place(relx=0.5, rely=0.01, anchor="n")
+        for widget in (self.left_text, self.right_text):
+            widget.bind("<Control-v>", self._paste_handler)
+            widget.bind("<Control-V>", self._paste_handler)
 
     def select_all(self, event):
         widget = event.widget
+        widget.focus_set()
         widget.tag_add("sel", "1.0", "end-1c")
+        widget.mark_set("insert", "1.0")
+        return "break"
+
+    def default_paste(self, event):
+        event.widget.event_generate("<<Paste>>")
+        return "break"
+
+    def _paste_handler(self, event):
+        w = event.widget
+        try:
+            txt = w.clipboard_get()
+        except tk.TclError:
+            return "break"
+        # replace any selection
+        if w.tag_ranges("sel"):
+            w.delete("sel.first", "sel.last")
+        w.insert("insert", txt)
         return "break"
 
     def copy_selection(self, event):
