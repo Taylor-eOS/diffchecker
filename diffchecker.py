@@ -148,83 +148,61 @@ class DiffCheckerApp:
         self.clear_highlights()
         self.left_original_lines = self.left_text.get("1.0", "end-1c").splitlines()
         self.right_original_lines = self.right_text.get("1.0", "end-1c").splitlines()
-        matcher = difflib.SequenceMatcher(
-            None,
-            self.left_original_lines,
-            self.right_original_lines)
-        aligned_left = []
-        aligned_right = []
-        left_map = []
-        right_map = []
+        aligned_left, aligned_right, aligned_norm_left, aligned_norm_right, left_map, right_map = self._align_lines()
+        self.left_map, self.right_map = left_map, right_map
+        self._render_lines(aligned_left, aligned_right)
+        self._apply_highlighting(aligned_left, aligned_right, aligned_norm_left, aligned_norm_right)
+
+    def _align_lines(self):
+        left_norm = [l.replace(" ", "") for l in self.left_original_lines]
+        right_norm = [l.replace(" ", "") for l in self.right_original_lines]
+        matcher = difflib.SequenceMatcher(None, left_norm, right_norm)
+        al, ar, anl, anr, lm, rm = [], [], [], [], [], []
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == "equal":
-                for idx in range(i1, i2):
-                    aligned_left.append(self.left_original_lines[idx])
-                    aligned_right.append(self.right_original_lines[j1 + (idx - i1)])
-                    left_map.append(idx)
-                    right_map.append(j1 + (idx - i1))
-            elif tag == "replace":
-                left_segment = self.left_original_lines[i1:i2]
-                right_segment = self.right_original_lines[j1:j2]
-                max_len = max(len(left_segment), len(right_segment))
-                for k in range(max_len):
-                    if k < len(left_segment):
-                        aligned_left.append(left_segment[k])
-                        left_map.append(i1 + k)
+                for k in range(i2 - i1):
+                    al.append(self.left_original_lines[i1 + k])
+                    ar.append(self.right_original_lines[j1 + k])
+                    norm = left_norm[i1 + k]
+                    anl.append(norm); anr.append(norm)
+                    lm.append(i1 + k); rm.append(j1 + k)
+            else:
+                left_seg = self.left_original_lines[i1:i2]
+                right_seg = self.right_original_lines[j1:j2]
+                ln_seg = left_norm[i1:i2]
+                rn_seg = right_norm[j1:j2]
+                m = max(len(left_seg), len(right_seg))
+                for k in range(m):
+                    if k < len(left_seg):
+                        al.append(left_seg[k]); anl.append(ln_seg[k]); lm.append(i1 + k)
                     else:
-                        aligned_left.append("")
-                        left_map.append(None)
+                        al.append(""); anl.append(""); lm.append(None)
+                    if k < len(right_seg):
+                        ar.append(right_seg[k]); anr.append(rn_seg[k]); rm.append(j1 + k)
+                    else:
+                        ar.append(""); anr.append(""); rm.append(None)
+        return al, ar, anl, anr, lm, rm
 
-                    if k < len(right_segment):
-                        aligned_right.append(right_segment[k])
-                        right_map.append(j1 + k)
-                    else:
-                        aligned_right.append("")
-                        right_map.append(None)
-            elif tag == "delete":
-                for idx in range(i1, i2):
-                    aligned_left.append(self.left_original_lines[idx])
-                    left_map.append(idx)
-                    aligned_right.append("")
-                    right_map.append(None)
-            elif tag == "insert":
-                for idx in range(j1, j2):
-                    aligned_left.append("")
-                    left_map.append(None)
-                    aligned_right.append(self.right_original_lines[idx])
-                    right_map.append(idx)
-        self.left_map = left_map
-        self.right_map = right_map
-        self.left_text.delete("1.0", "end")
-        self.right_text.delete("1.0", "end")
-        for line in aligned_left:
-            self.left_text.insert("end", line + "\n")
-        for line in aligned_right:
-            self.right_text.insert("end", line + "\n")
-        total_lines = len(aligned_left)
-        for i in range(total_lines):
-            left_line = aligned_left[i]
-            right_line = aligned_right[i]
-            if left_line != right_line:
-                left_start = f"{i + 1}.0"
-                left_end = f"{i + 1}.end"
-                right_start = f"{i + 1}.0"
-                right_end = f"{i + 1}.end"
-                if not left_line:
-                    self.left_text.tag_add("left_gap", left_start, left_end)
-                    self.right_text.tag_add("right_ins", right_start, right_end)
-                elif not right_line:
-                    self.left_text.tag_add("left_del", left_start, left_end)
-                    self.right_text.tag_add("right_gap", right_start, right_end)
-                else:
-                    self.left_text.tag_add("left_diff", left_start, left_end)
-                    self.right_text.tag_add("right_diff", right_start, right_end)
-        self.left_text.tag_config("left_diff", background="#FFC0C0")
-        self.right_text.tag_config("right_diff", background="#C0FFC0")
-        self.left_text.tag_config("left_del", background="#FFD0D0")
-        self.right_text.tag_config("right_ins", background="#D0FFD0")
-        self.left_text.tag_config("left_gap", background="#F0F0F0")
-        self.right_text.tag_config("right_gap", background="#F0F0F0")
+    def _render_lines(self, aligned_left, aligned_right):
+        self.left_text.delete("1.0", "end"); self.right_text.delete("1.0", "end")
+        for ln in aligned_left: self.left_text.insert("end", ln + "\n")
+        for ln in aligned_right: self.right_text.insert("end", ln + "\n")
+
+    def _apply_highlighting(self, aligned_left, aligned_right, aligned_norm_left, aligned_norm_right):
+        for i, (l, r, nl, nr) in enumerate(zip(aligned_left, aligned_right, aligned_norm_left, aligned_norm_right)):
+            if nl == nr: 
+                continue
+            ls, le = f"{i+1}.0", f"{i+1}.end"; rs, re = ls, le
+            if not l:
+                self.left_text.tag_add("left_gap", ls, le); self.right_text.tag_add("right_ins", rs, re)
+            elif not r:
+                self.left_text.tag_add("left_del", ls, le); self.right_text.tag_add("right_gap", rs, re)
+            else:
+                self.left_text.tag_add("left_diff", ls, le); self.right_text.tag_add("right_diff", rs, re)
+        cfg = self.left_text.tag_config
+        cfg("left_diff", background="#FFC0C0"); cfg("left_del", background="#FFD0D0"); cfg("left_gap", background="#F0F0F0")
+        cfg = self.right_text.tag_config
+        cfg("right_diff", background="#C0FFC0"); cfg("right_ins", background="#D0FFD0"); cfg("right_gap", background="#F0F0F0")
 
 if __name__ == "__main__":
     DiffCheckerApp()
