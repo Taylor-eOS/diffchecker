@@ -68,6 +68,8 @@ class DiffCheckerApp:
         for widget in (self.left_text, self.right_text):
             widget.bind("<Control-v>", self._paste_handler)
             widget.bind("<Control-V>", self._paste_handler)
+        self.left_text.bind("<space>", self._on_left_transfer_key)
+        self.right_text.bind("<space>", self._on_right_transfer_key)
 
     def select_all(self, event):
         widget = event.widget
@@ -86,7 +88,6 @@ class DiffCheckerApp:
             txt = w.clipboard_get()
         except tk.TclError:
             return "break"
-        # replace any selection
         if w.tag_ranges("sel"):
             w.delete("sel.first", "sel.last")
         w.insert("insert", txt)
@@ -116,6 +117,63 @@ class DiffCheckerApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(text_to_copy)
         return "break"
+
+    def _on_left_transfer_key(self, event):
+        if self._transfer_block(event.widget, source="left"):
+            return "break"
+
+    def _on_right_transfer_key(self, event):
+        if self._transfer_block(event.widget, source="right"):
+            return "break"
+
+    def _transfer_block(self, widget, source):
+        index = widget.index("insert")
+        row = int(index.split(".")[0]) - 1
+        norm_left, norm_right = self.aligned_norm_left, self.aligned_norm_right
+        if row < 0 or row >= len(norm_left):
+            return False
+        if norm_left[row] == norm_right[row]:
+            return False
+        start = row
+        while start > 0 and norm_left[start - 1] != norm_right[start - 1]:
+            start -= 1
+        end = row
+        while end < len(norm_left) - 1 and norm_left[end + 1] != norm_right[end + 1]:
+            end += 1
+        left_indices = [self.left_map[i] for i in range(start, end + 1)]
+        right_indices = [self.right_map[i] for i in range(start, end + 1)]
+        if source == "left":
+            src_lines = [self.left_original_lines[i] for i in left_indices if i is not None]
+            fallback = self._fallback_insert_point(self.right_map, start)
+            self._splice_block(self.right_original_lines, right_indices, src_lines, fallback)
+        else:
+            src_lines = [self.right_original_lines[i] for i in right_indices if i is not None]
+            fallback = self._fallback_insert_point(self.left_map, start)
+            self._splice_block(self.left_original_lines, left_indices, src_lines, fallback)
+        self._rebuild_text_widgets()
+        self.compare_texts()
+        return True
+
+    def _fallback_insert_point(self, dest_map, block_start):
+        for i in range(block_start - 1, -1, -1):
+            if dest_map[i] is not None:
+                return dest_map[i] + 1
+        return 0
+
+    def _splice_block(self, dest_lines, dest_indices, src_lines, fallback):
+        present = [i for i in dest_indices if i is not None]
+        if present:
+            insert_at = present[0]
+            del dest_lines[present[0]:present[-1] + 1]
+        else:
+            insert_at = fallback
+        dest_lines[insert_at:insert_at] = src_lines
+
+    def _rebuild_text_widgets(self):
+        self.left_text.delete("1.0", "end")
+        self.right_text.delete("1.0", "end")
+        self.left_text.insert("end", "\n".join(self.left_original_lines))
+        self.right_text.insert("end", "\n".join(self.right_original_lines))
 
     def _on_scroll_both_y(self, *args):
         self.left_text.yview(*args)
@@ -150,6 +208,7 @@ class DiffCheckerApp:
         self.right_original_lines = self.right_text.get("1.0", "end-1c").splitlines()
         aligned_left, aligned_right, aligned_norm_left, aligned_norm_right, left_map, right_map = self._align_lines()
         self.left_map, self.right_map = left_map, right_map
+        self.aligned_norm_left, self.aligned_norm_right = aligned_norm_left, aligned_norm_right
         self._render_lines(aligned_left, aligned_right)
         self._apply_highlighting(aligned_left, aligned_right, aligned_norm_left, aligned_norm_right)
 
@@ -206,4 +265,3 @@ class DiffCheckerApp:
 
 if __name__ == "__main__":
     DiffCheckerApp()
-
