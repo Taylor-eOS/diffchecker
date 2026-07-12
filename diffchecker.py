@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import filedialog
 import difflib
+
+EMPTYLINE = "\u2205"
 
 class DiffCheckerApp:
     def __init__(self):
@@ -76,6 +79,11 @@ class DiffCheckerApp:
             text="Last Change",
             command=self.jump_to_last_change)
         self.last_change_button.place(relx=0.5, rely=0.01, anchor="n", y=40)
+        self.save_right_button = ttk.Button(
+            self.root,
+            text="Save",
+            command=self.save_right_pane)
+        self.save_right_button.place(relx=0.5, rely=0.01, anchor="n", x=120)
         for widget in (self.left_text, self.right_text):
             widget.bind("<Control-v>", self._paste_handler)
             widget.bind("<Control-V>", self._paste_handler)
@@ -193,16 +201,16 @@ class DiffCheckerApp:
     def _transfer_block(self, widget, source):
         index = widget.index("insert")
         row = int(index.split(".")[0]) - 1
-        norm_left, norm_right = self.aligned_norm_left, self.aligned_norm_right
-        if row < 0 or row >= len(norm_left):
+        row_equal = self.row_equal
+        if row < 0 or row >= len(row_equal):
             return False
-        if norm_left[row] == norm_right[row]:
+        if row_equal[row]:
             return False
         start = row
-        while start > 0 and norm_left[start - 1] != norm_right[start - 1]:
+        while start > 0 and not row_equal[start - 1]:
             start -= 1
         end = row
-        while end < len(norm_left) - 1 and norm_left[end + 1] != norm_right[end + 1]:
+        while end < len(row_equal) - 1 and not row_equal[end + 1]:
             end += 1
         left_indices = [self.left_map[i] for i in range(start, end + 1)]
         right_indices = [self.right_map[i] for i in range(start, end + 1)]
@@ -264,6 +272,15 @@ class DiffCheckerApp:
         self.right_scroll_y.set(*self.right_text.yview())
         return "break"
 
+    def save_right_pane(self):
+        if not hasattr(self, "right_original_lines"):
+            return
+        path = filedialog.asksaveasfilename(defaultextension=".txt")
+        if not path:
+            return
+        with open(path, "w") as f:
+            f.write("\n".join(self.right_original_lines))
+
     def clear_highlights(self):
         for text in (self.left_text, self.right_text):
             for tag in text.tag_names():
@@ -273,9 +290,10 @@ class DiffCheckerApp:
         self.clear_highlights()
         self.left_original_lines = self.left_text.get("1.0", "end-1c").splitlines()
         self.right_original_lines = self.right_text.get("1.0", "end-1c").splitlines()
-        aligned_left, aligned_right, aligned_norm_left, aligned_norm_right, left_map, right_map = self._align_lines()
+        aligned_left, aligned_right, aligned_norm_left, aligned_norm_right, left_map, right_map, row_equal = self._align_lines()
         self.left_map, self.right_map = left_map, right_map
         self.aligned_norm_left, self.aligned_norm_right = aligned_norm_left, aligned_norm_right
+        self.row_equal = row_equal
         self._render_lines(aligned_left, aligned_right)
         self._apply_highlighting(aligned_left, aligned_right, aligned_norm_left, aligned_norm_right)
 
@@ -283,7 +301,7 @@ class DiffCheckerApp:
         left_norm = [l.replace(" ", "") for l in self.left_original_lines]
         right_norm = [l.replace(" ", "") for l in self.right_original_lines]
         matcher = difflib.SequenceMatcher(None, left_norm, right_norm)
-        al, ar, anl, anr, lm, rm = [], [], [], [], [], []
+        al, ar, anl, anr, lm, rm, eq = [], [], [], [], [], [], []
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == "equal":
                 for k in range(i2 - i1):
@@ -292,6 +310,7 @@ class DiffCheckerApp:
                     norm = left_norm[i1 + k]
                     anl.append(norm); anr.append(norm)
                     lm.append(i1 + k); rm.append(j1 + k)
+                    eq.append(True)
             else:
                 left_seg = self.left_original_lines[i1:i2]
                 right_seg = self.right_original_lines[j1:j2]
@@ -302,12 +321,13 @@ class DiffCheckerApp:
                     if k < len(left_seg):
                         al.append(left_seg[k]); anl.append(ln_seg[k]); lm.append(i1 + k)
                     else:
-                        al.append(""); anl.append(""); lm.append(None)
+                        al.append(EMPTYLINE); anl.append(None); lm.append(None)
                     if k < len(right_seg):
                         ar.append(right_seg[k]); anr.append(rn_seg[k]); rm.append(j1 + k)
                     else:
-                        ar.append(""); anr.append(""); rm.append(None)
-        return al, ar, anl, anr, lm, rm
+                        ar.append(EMPTYLINE); anr.append(None); rm.append(None)
+                    eq.append(False)
+        return al, ar, anl, anr, lm, rm, eq
 
     def _render_lines(self, aligned_left, aligned_right):
         self.left_text.delete("1.0", "end"); self.right_text.delete("1.0", "end")
@@ -316,12 +336,14 @@ class DiffCheckerApp:
 
     def _apply_highlighting(self, aligned_left, aligned_right, aligned_norm_left, aligned_norm_right):
         for i, (l, r, nl, nr) in enumerate(zip(aligned_left, aligned_right, aligned_norm_left, aligned_norm_right)):
-            if nl == nr: 
+            if nl == nr:
                 continue
             ls, le = f"{i+1}.0", f"{i+1}.end"; rs, re = ls, le
-            if not l:
+            left_gap = self.left_map[i] is None
+            right_gap = self.right_map[i] is None
+            if left_gap:
                 self.left_text.tag_add("left_gap", ls, le); self.right_text.tag_add("right_ins", rs, re)
-            elif not r:
+            elif right_gap:
                 self.left_text.tag_add("left_del", ls, le); self.right_text.tag_add("right_gap", rs, re)
             else:
                 self.left_text.tag_add("left_diff", ls, le); self.right_text.tag_add("right_diff", rs, re)
