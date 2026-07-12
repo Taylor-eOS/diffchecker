@@ -83,12 +83,14 @@ class DiffCheckerApp:
             self.root,
             text="Save",
             command=self.save_right_pane)
-        self.save_right_button.place(relx=0.5, rely=0.01, anchor="n", x=120)
+        self.save_right_button.place(relx=0.5, rely=0.01, anchor="n", x=200)
         for widget in (self.left_text, self.right_text):
             widget.bind("<Control-v>", self._paste_handler)
             widget.bind("<Control-V>", self._paste_handler)
-        self.left_text.bind("<space>", self._on_left_transfer_key)
-        self.right_text.bind("<space>", self._on_right_transfer_key)
+        self.left_text.bind("<c>", self._on_left_transfer_key)
+        self.right_text.bind("<c>", self._on_right_transfer_key)
+        self.left_text.bind("<space>", self._on_next_diff_key)
+        self.right_text.bind("<space>", self._on_next_diff_key)
 
     def select_all(self, event):
         widget = event.widget
@@ -189,6 +191,10 @@ class DiffCheckerApp:
             text.mark_set("insert", f"{line}.0")
         self._center_on_line(line)
         widget.focus_set()
+
+    def _on_next_diff_key(self, event):
+        self.jump_to_next_diff()
+        return "break"
 
     def _on_left_transfer_key(self, event):
         if self._transfer_block(event.widget, source="left"):
@@ -300,7 +306,7 @@ class DiffCheckerApp:
     def _align_lines(self):
         left_norm = [l.replace(" ", "") for l in self.left_original_lines]
         right_norm = [l.replace(" ", "") for l in self.right_original_lines]
-        matcher = difflib.SequenceMatcher(None, left_norm, right_norm)
+        matcher = difflib.SequenceMatcher(None, left_norm, right_norm, autojunk=False)
         al, ar, anl, anr, lm, rm, eq = [], [], [], [], [], [], []
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == "equal":
