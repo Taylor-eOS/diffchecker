@@ -9,6 +9,7 @@ class DiffCheckerApp:
         self.root.attributes("-zoomed", True)
         self.left_map = []
         self.right_map = []
+        self.last_change_line = None
         self.setup_widgets()
         self.root.mainloop()
 
@@ -65,6 +66,16 @@ class DiffCheckerApp:
             text="Compare",
             command=self.compare_texts)
         self.compare_button.place(relx=0.5, rely=0.01, anchor="n")
+        self.next_diff_button = ttk.Button(
+            self.root,
+            text="Next Diff",
+            command=self.jump_to_next_diff)
+        self.next_diff_button.place(relx=0.5, rely=0.01, anchor="n", y=80)
+        self.last_change_button = ttk.Button(
+            self.root,
+            text="Last Change",
+            command=self.jump_to_last_change)
+        self.last_change_button.place(relx=0.5, rely=0.01, anchor="n", y=40)
         for widget in (self.left_text, self.right_text):
             widget.bind("<Control-v>", self._paste_handler)
             widget.bind("<Control-V>", self._paste_handler)
@@ -118,6 +129,59 @@ class DiffCheckerApp:
         self.root.clipboard_append(text_to_copy)
         return "break"
 
+    def _center_on_line(self, line):
+        total_lines = int(self.left_text.index("end-1c").split(".")[0])
+        if total_lines < 1:
+            total_lines = 1
+        half_window = 21
+        target = line - 1 - half_window
+        if target < 0:
+            target = 0
+        fraction = target / total_lines
+        self.left_text.yview_moveto(fraction)
+        self.right_text.yview_moveto(fraction)
+        self.left_scroll_y.set(*self.left_text.yview())
+        self.right_scroll_y.set(*self.right_text.yview())
+
+    def jump_to_next_diff(self):
+        norm_left, norm_right = getattr(self, "aligned_norm_left", None), getattr(self, "aligned_norm_right", None)
+        if not norm_left:
+            return
+        widget = self.root.focus_get()
+        if widget not in (self.left_text, self.right_text):
+            widget = self.left_text
+        try:
+            row = int(widget.index("sel.last").split(".")[0])
+        except tk.TclError:
+            row = int(widget.index("insert").split(".")[0])
+        start_row = row
+        total = len(norm_left)
+        for offset in range(1, total + 1):
+            i = (start_row - 1 + offset) % total
+            if norm_left[i] != norm_right[i]:
+                line = i + 1
+                for text in (self.left_text, self.right_text):
+                    text.tag_remove("sel", "1.0", "end")
+                    text.tag_add("sel", f"{line}.0", f"{line}.end")
+                    text.mark_set("insert", f"{line}.0")
+                self._center_on_line(line)
+                widget.focus_set()
+                return
+
+    def jump_to_last_change(self):
+        if self.last_change_line is None:
+            return
+        widget = self.root.focus_get()
+        if widget not in (self.left_text, self.right_text):
+            widget = self.left_text
+        line = self.last_change_line
+        for text in (self.left_text, self.right_text):
+            text.tag_remove("sel", "1.0", "end")
+            text.tag_add("sel", f"{line}.0", f"{line}.end")
+            text.mark_set("insert", f"{line}.0")
+        self._center_on_line(line)
+        widget.focus_set()
+
     def _on_left_transfer_key(self, event):
         if self._transfer_block(event.widget, source="left"):
             return "break"
@@ -150,8 +214,11 @@ class DiffCheckerApp:
             src_lines = [self.right_original_lines[i] for i in right_indices if i is not None]
             fallback = self._fallback_insert_point(self.left_map, start)
             self._splice_block(self.left_original_lines, left_indices, src_lines, fallback)
+        self.last_change_line = start + 1
         self._rebuild_text_widgets()
         self.compare_texts()
+        self.jump_to_last_change()
+        #self.jump_to_next_diff()
         return True
 
     def _fallback_insert_point(self, dest_map, block_start):
