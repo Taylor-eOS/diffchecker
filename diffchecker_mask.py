@@ -27,6 +27,13 @@ def normalize_line(line):
                 i += 1
             out.append("<NUM>")
             continue
+        if c == " ":
+            j = i + 1
+            while j < n and result[j] == " ":
+                j += 1
+            out.append(" ")
+            i = j
+            continue
         out.append(c)
         i += 1
     return "".join(out)
@@ -93,7 +100,12 @@ class DiffCheckerApp:
             self.root,
             text="Compare",
             command=self.compare_texts)
-        self.compare_button.place(relx=0.5, rely=0.01, anchor="n")
+        self.compare_button.place(relx=0.5, rely=0.01, anchor="n", x=-60)
+        self.remove_same_button = ttk.Button(
+            self.root,
+            text="Remove same lines",
+            command=self.remove_same_lines)
+        self.remove_same_button.place(relx=0.5, rely=0.01, anchor="n", x=60)
         for widget in (self.left_text, self.right_text):
             widget.bind("<Control-v>", self._paste_handler)
             widget.bind("<Control-V>", self._paste_handler)
@@ -182,6 +194,24 @@ class DiffCheckerApp:
         self._render_lines(aligned_left, aligned_right)
         self._apply_highlighting(aligned_left, aligned_right, aligned_norm_left, aligned_norm_right)
 
+    def remove_same_lines(self):
+        left_lines = self.left_text.get("1.0", "end-1c").split("\n")
+        right_lines = self.right_text.get("1.0", "end-1c").split("\n")
+        new_left, new_right, new_left_map, new_right_map = [], [], [], []
+        n = max(len(left_lines), len(right_lines))
+        for i in range(n):
+            l = left_lines[i] if i < len(left_lines) else ""
+            r = right_lines[i] if i < len(right_lines) else ""
+            if normalize_line(l) == normalize_line(r):
+                continue
+            new_left.append(l); new_right.append(r)
+            orig_l = self.left_map[i] if i < len(self.left_map) else None
+            orig_r = self.right_map[i] if i < len(self.right_map) else None
+            new_left_map.append(orig_l); new_right_map.append(orig_r)
+        self.left_map, self.right_map = new_left_map, new_right_map
+        self.clear_highlights()
+        self._render_lines(new_left, new_right)
+
     def _align_lines(self):
         left_norm = [normalize_line(l) for l in self.left_original_lines]
         right_norm = [normalize_line(l) for l in self.right_original_lines]
@@ -235,4 +265,3 @@ class DiffCheckerApp:
 
 if __name__ == "__main__":
     DiffCheckerApp()
-
